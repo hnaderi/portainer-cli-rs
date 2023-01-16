@@ -6,7 +6,7 @@
       devShell.x86_64-linux = with pkgs;
         mkShell {
           name = "portainer-cli";
-          nativeBuildInputs = [ rustc cargo gcc ];
+          nativeBuildInputs = [ rustc cargo gcc openssl.dev pkg-config ];
           buildInputs = [ rustfmt rust-analyzer clippy rustup ];
 
           RUST_SRC_PATH =
