@@ -1,11 +1,14 @@
+use std::fmt::Display;
+
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value as Json;
 
 pub trait PortainerClient {
     fn send(&self, req: &PortainerRequest) -> Json;
-    fn expect<O: DeserializeOwned>(&self, req: &PortainerRequest) -> O {
-        serde_json::from_value(self.send(req)).expect("Invalid response format!")
-    }
+}
+
+pub fn expect<O: DeserializeOwned>(client: &dyn PortainerClient, req: &PortainerRequest) -> O {
+    serde_json::from_value(client.send(req)).expect("Invalid response format!")
 }
 
 pub struct PortainerRequest {
@@ -59,6 +62,26 @@ impl PortainerRequest {
         }
         self
     }
+    pub fn with_query_opt<T: Display>(self, key: &str, value: Option<T>) -> Self {
+        if let Some(v) = value {
+            self.with_query(key, &format!("{}", v))
+        } else {
+            self
+        }
+    }
+    pub fn with_query_list<T: Display>(self, key: &str, value: Vec<T>) -> Self {
+        let mut temp = self;
+        for v in value {
+            temp = temp.with_query(key, &format!("{}", v));
+        }
+        temp
+    }
+    pub fn with_filters<T: Serialize>(self, t: T) -> Self {
+        self.with_query(
+            "filters",
+            &serde_json::to_string(&t).expect("Cannot serialize filters!"),
+        )
+    }
 }
 
 pub enum HttpMethod {
@@ -68,13 +91,14 @@ pub enum HttpMethod {
     DELETE,
 }
 
+#[derive(Clone)]
 pub enum Credential {
     Public,
     APIToken(String),
     JwtToken(String),
 }
 
-use reqwest::{blocking::Client as HttpClient, blocking::RequestBuilder};
+use reqwest::blocking::Client as HttpClient;
 
 pub struct DefaultClient {
     credential: Credential,
@@ -123,4 +147,15 @@ impl PortainerClient for DefaultClient {
             Ok(rrr) => rrr.json().expect("Not a valid json!"),
         }
     }
+}
+
+pub struct DefaultClientFactory;
+impl ClientFactory for DefaultClientFactory {
+    fn build(&self, credential: Credential, server: &str) -> Box<dyn PortainerClient> {
+        Box::new(DefaultClient::new(credential, server))
+    }
+}
+
+pub trait ClientFactory {
+    fn build(&self, credential: Credential, server: &str) -> Box<dyn PortainerClient>;
 }

@@ -14,9 +14,9 @@ pub enum CLICommand {
         secrets: Vec<FileMapping>,
     },
     Destroy {
-        // server: ServerConfig,
+        server: ServerConfig,
         stack: String,
-        // endpoint: EndpointSelector,
+        endpoint: EndpointSelector,
         confirmed: bool,
         configs: Vec<String>,
         secrets: Vec<String>,
@@ -26,9 +26,7 @@ pub enum CLICommand {
         address: String,
         credential: LoginCredential,
     },
-    Logout {
-        server: String,
-    },
+    Logout(String),
 }
 
 pub struct InlineEnv {
@@ -54,7 +52,15 @@ pub enum LoginCredential {
 }
 
 pub enum ServerConfig {
-    Inline { address: String, token: String },
+    InlineToken {
+        address: String,
+        token: String,
+    },
+    InlineLogin {
+        address: String,
+        username: String,
+        password: Option<String>,
+    },
     Session(String),
 }
 
@@ -66,11 +72,24 @@ fn server_config_parse(matches: &ArgMatches) -> ParseResult<ServerConfig> {
     } else {
         let address = matches.get_one::<String>("address");
         let token = matches.get_one::<String>("token");
+
+        let username = matches.get_one::<String>("username");
         token
             .zip(address)
-            .map(|(token, address)| ServerConfig::Inline {
+            .map(|(token, address)| ServerConfig::InlineToken {
                 address: address.to_string(),
                 token: token.to_string(),
+            })
+            .or_else(|| {
+                address
+                    .zip(username)
+                    .map(|(address, username)| -> ServerConfig {
+                        ServerConfig::InlineLogin {
+                            address: address.to_string(),
+                            username: username.to_string(),
+                            password: matches.get_one::<String>("password").cloned(),
+                        }
+                    })
             })
             .ok_or_else(|| "You must enter either session or address and token".to_string())
     }
@@ -78,9 +97,11 @@ fn server_config_parse(matches: &ArgMatches) -> ParseResult<ServerConfig> {
 fn deploy_command() -> Command {
     Command::new("deploy")
         .about("deploys stack and its dependencies")
-        .arg(arg!(--token <token> "API token"))
-        .arg(arg!(--address <url> "Server address"))
-        .arg(arg!(--session <name> "Existing session name"))
+        .arg(arg!(-t --token <token> "API token"))
+        .arg(arg!(-u --username <username> "username to login"))
+        .arg(arg!(-p --password <password> "password for login"))
+        .arg(arg!(-H --address <url> "Server address"))
+        .arg(arg!(-S --session <name> "Existing session name"))
 }
 
 fn deploy_parse(matches: &ArgMatches) -> ParseResult<CLICommand> {

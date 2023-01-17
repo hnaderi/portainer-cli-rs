@@ -10,7 +10,7 @@ fn main() {
         Err(details) => eprintln!("Invalid arguments!\n{0}", details),
         Ok(cmd) => {
             let app = application::Application::new();
-            match app.handle(&cmd) {
+            match app.handle(cmd) {
                 Ok(()) => (),
                 Err(details) => eprintln!("Failed to handle requested command!\n{0}", details),
             }
