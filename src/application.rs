@@ -11,6 +11,13 @@ impl Application {
     pub fn new() -> Application {
         todo!()
     }
+    fn readpassword() -> String {
+        use std::io::Write;
+        print!("Type a password: ");
+        std::io::stdout().flush().unwrap();
+        rpassword::read_password().expect("Password is required for loging in!")
+    }
+
     fn load_session(&self, config: ServerConfig, cl: Client) -> Result<Session2, String> {
         match config {
             ServerConfig::InlineLogin {
@@ -18,7 +25,7 @@ impl Application {
                 username,
                 password,
             } => {
-                let password = password.unwrap_or(String::from("")); //TODO readpass
+                let password = password.unwrap_or(Application::readpassword());
                 Ok(cl.authenticate(Authentication::Login { username, password }, &address))
             }
             ServerConfig::InlineToken { address, token } => {
