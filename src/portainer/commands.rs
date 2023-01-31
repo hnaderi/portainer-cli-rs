@@ -1,5 +1,6 @@
 use clap::ArgMatches;
 use clap::{arg, Command};
+use std::fmt::format;
 use std::path::Path;
 
 pub enum CLICommand {
@@ -131,11 +132,16 @@ fn build_command() -> Command {
         .subcommand(logout_command())
 }
 pub fn parse_command() -> ParseResult<CLICommand> {
-    let matches = build_command().get_matches();
-    match matches.subcommand() {
+    match build_command().get_matches().subcommand() {
         Some(("deploy", matches)) => deploy_parse(&matches),
         Some(("destroy", matches)) => deploy_parse(&matches),
-        Some(_value) => todo!(),
-        None => todo!(),
+        Some(("login", matches)) => deploy_parse(&matches),
+        Some(("logout", matches)) => deploy_parse(&matches),
+        Some((cmd, _)) => ParseResult::Err(format!("Unknown command '{}'", cmd)),
+        None => {
+            build_command().print_help().expect("cannot print help");
+
+            ParseResult::Err(format!("Command is required!"))
+        }
     }
 }
