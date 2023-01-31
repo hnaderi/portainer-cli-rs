@@ -128,10 +128,10 @@ impl Endpoint {
 }
 
 pub mod raw_requests {
-    use crate::portainer::client::PortainerRequest;
+    use crate::portainer::client::{PortainerRequest, PRT};
     use crate::portainer::requests::*;
 
-    pub fn login(username: &str, password: &str) -> PortainerRequest {
+    pub fn login(username: &str, password: &str) -> PRT<JwtToken> {
         PortainerRequest::post(
             "/auth",
             Login {
@@ -139,50 +139,56 @@ pub mod raw_requests {
                 password: password.to_string(),
             },
         )
+        .into()
     }
 
-    pub fn list_tags() -> PortainerRequest {
-        PortainerRequest::get("/tags")
+    pub fn list_tags() -> PRT<Vec<Tag>> {
+        PortainerRequest::get("/tags").into()
     }
 
-    pub fn get_endpoint_info(id: i32) -> PortainerRequest {
-        PortainerRequest::get(&format!("/endpoints/{}/docker/info", id))
+    pub fn get_endpoint_info(id: i32) -> PRT<EndpointInfo> {
+        PortainerRequest::get(&format!("/endpoints/{}/docker/info", id)).into()
     }
 
     pub fn list_secrets(
         endpoint: i32,
         id: Option<String>,
         names: Option<Vec<String>>,
-    ) -> PortainerRequest {
+    ) -> PRT<Vec<Secret>> {
         PortainerRequest::get(&format!("/endpoints/{}/docker/secrets", endpoint))
             .with_filters(ConfigSecretFilter { id, names })
+            .into()
     }
     pub fn list_configs(
         endpoint: i32,
         id: Option<String>,
         names: Option<Vec<String>>,
-    ) -> PortainerRequest {
+    ) -> PRT<Vec<Config>> {
         PortainerRequest::get(&format!("/endpoints/{}/docker/configs", endpoint))
             .with_filters(ConfigSecretFilter { id, names })
+            .into()
     }
 
-    pub fn list_endpoints(tag_ids: Vec<i32>, name: Option<String>) -> PortainerRequest {
+    pub fn list_endpoints(tag_ids: Vec<i32>, name: Option<String>) -> PRT<Vec<Endpoint>> {
         PortainerRequest::get("/endpoints")
             .with_query_list("tagIds", tag_ids)
             .with_query_opt("name", name)
+            .into()
     }
-    pub fn get_endpoint(id: i32) -> PortainerRequest {
-        PortainerRequest::get(&format!("/endpoints/{}", id))
+    pub fn get_endpoint(id: i32) -> PRT<Endpoint> {
+        PortainerRequest::get(&format!("/endpoints/{}", id)).into()
     }
 
-    pub fn list_stacks(endpoint_id: Option<i32>, swarm_id: Option<String>) -> PortainerRequest {
-        PortainerRequest::get("/stacks").with_filters(StackFilter {
-            endpoint_id,
-            swarm_id,
-        })
+    pub fn list_stacks(endpoint_id: Option<i32>, swarm_id: Option<String>) -> PRT<Vec<Stack>> {
+        PortainerRequest::get("/stacks")
+            .with_filters(StackFilter {
+                endpoint_id,
+                swarm_id,
+            })
+            .into()
     }
-    pub fn get_stack(id: i32) -> PortainerRequest {
-        PortainerRequest::get(&format!("/stacks/{}", id))
+    pub fn get_stack(id: i32) -> PRT<Stack> {
+        PortainerRequest::get(&format!("/stacks/{}", id)).into()
     }
     pub fn update_stacks(
         endpoint_id: i32,

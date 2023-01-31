@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, marker::PhantomData, ops::Deref};
 
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value as Json;
@@ -9,6 +9,35 @@ pub trait PortainerClient {
 
 pub fn expect<O: DeserializeOwned>(client: &dyn PortainerClient, req: &PortainerRequest) -> O {
     serde_json::from_value(client.send(req)).expect("Invalid response format!")
+}
+
+pub struct PRT<O: DeserializeOwned>(PortainerRequest, PhantomData<O>);
+
+impl<O: DeserializeOwned> PRT<O> {
+    pub fn new(request: PortainerRequest) -> PRT<O> {
+        PRT(request, PhantomData::default())
+    }
+    pub fn send(&self, client: &dyn PortainerClient) -> O {
+        serde_json::from_value(client.send(&self.0)).expect("Invalid response format!")
+    }
+}
+impl<O: DeserializeOwned> Deref for PRT<O> {
+    type Target = PortainerRequest;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<O: DeserializeOwned> From<PRT<O>> for PortainerRequest {
+    fn from(typed: PRT<O>) -> Self {
+        typed.0
+    }
+}
+impl<O: DeserializeOwned> From<PortainerRequest> for PRT<O> {
+    fn from(req: PortainerRequest) -> Self {
+        PRT::new(req)
+    }
 }
 
 pub struct PortainerRequest {

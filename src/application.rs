@@ -1,7 +1,9 @@
-use crate::portainer::api::{Authentication, Client, Session2};
+use std::path::Path;
+
+use crate::portainer::api::{Authentication, Client, Session};
 use crate::portainer::client::DefaultClientFactory;
 use crate::portainer::commands::{CLICommand, LoginCredential, ServerConfig};
-use crate::portainer::session::SessionManager;
+use crate::portainer::session::{LocalSessionManager, SessionManager};
 
 pub struct Application {
     session: Box<dyn SessionManager>,
@@ -9,7 +11,10 @@ pub struct Application {
 
 impl Application {
     pub fn new() -> Application {
-        todo!()
+        let p = Box::from(Path::new(".portainer.json"));
+        let lsm = LocalSessionManager::new(p).expect("Invalid session file");
+        let session = Box::new(lsm);
+        Application { session }
     }
     fn readpassword() -> String {
         use std::io::Write;
@@ -18,7 +23,7 @@ impl Application {
         rpassword::read_password().expect("Password is required for loging in!")
     }
 
-    fn load_session(&self, config: ServerConfig, cl: Client) -> Result<Session2, String> {
+    fn load_session(&self, config: ServerConfig, cl: Client) -> Result<Session, String> {
         match config {
             ServerConfig::InlineLogin {
                 address,
@@ -26,22 +31,20 @@ impl Application {
                 password,
             } => {
                 let password = password.unwrap_or(Application::readpassword());
-                Ok(cl.authenticate(Authentication::Login { username, password }, &address))
+                cl.authenticate(Authentication::Login { username, password }, &address)
             }
             ServerConfig::InlineToken { address, token } => {
-                Ok(cl.authenticate(Authentication::APIToken(token), &address))
+                cl.authenticate(Authentication::APIToken(token), &address)
             }
 
             ServerConfig::Session(name) => {
-                let _data = self.session.get(&name).ok_or("No such session!")?;
-
-                todo!()
+                let (auth, url) = self.session.get(&name)?.to_tuple();
+                cl.authenticate(auth, &url)
             }
         }
     }
 
     pub fn handle(&self, command: CLICommand) -> Result<(), String> {
-        let not_implemented = Err("Not implemented yet!".to_string());
         let client = Client::new(Box::new(DefaultClientFactory));
 
         match command {
@@ -61,9 +64,8 @@ impl Application {
                 };
 
                 client
-                    .authenticate(auth, &address)
-                    .save(self.session.as_ref(), &server);
-                Ok(())
+                    .authenticate(auth, &address)?
+                    .save(self.session.as_ref(), &server)
             }
             CLICommand::Deploy {
                 server,
@@ -75,15 +77,37 @@ impl Application {
                 configs,
                 secrets,
             } => {
-                self.load_session(server, client)?
-                    .endpoint(&endpoint)
-                    .deploy();
+                let plan = self
+                    .load_session(server, client)?
+                    .endpoint(&endpoint)?
+                    .deploy(compose, stack, inline_vars, configs, secrets)?;
 
-                Ok(())
+                if confirmed {
+                    plan.execute()
+                } else {
+                    Ok(())
+                }
             }
-            CLICommand::Logout(name) => Ok(self.session.remove(&name)),
+            CLICommand::Destroy {
+                server,
+                stack,
+                endpoint,
+                confirmed,
+                configs,
+                secrets,
+            } => {
+                let plan = self
+                    .load_session(server, client)?
+                    .endpoint(&endpoint)?
+                    .destroy(stack, configs, secrets)?;
 
-            _ => not_implemented,
+                if confirmed {
+                    plan.execute()
+                } else {
+                    Ok(())
+                }
+            }
+            CLICommand::Logout(name) => self.session.remove(&name),
         }
     }
 }
