@@ -128,11 +128,11 @@ impl Endpoint {
 }
 
 pub mod raw_requests {
-    use crate::portainer::client::{PortainerRequest, PRT};
+    use crate::portainer::client::{PortainerRequest, PortainerRequestRaw};
     use crate::portainer::requests::*;
 
-    pub fn login(username: &str, password: &str) -> PRT<JwtToken> {
-        PortainerRequest::post(
+    pub fn login(username: &str, password: &str) -> PortainerRequest<JwtToken> {
+        PortainerRequestRaw::post(
             "/auth",
             Login {
                 username: username.to_string(),
@@ -142,20 +142,20 @@ pub mod raw_requests {
         .into()
     }
 
-    pub fn list_tags() -> PRT<Vec<Tag>> {
-        PortainerRequest::get("/tags").into()
+    pub fn list_tags() -> PortainerRequest<Vec<Tag>> {
+        PortainerRequestRaw::get("/tags").into()
     }
 
-    pub fn get_endpoint_info(id: i32) -> PRT<EndpointInfo> {
-        PortainerRequest::get(&format!("/endpoints/{}/docker/info", id)).into()
+    pub fn get_endpoint_info(id: i32) -> PortainerRequest<EndpointInfo> {
+        PortainerRequestRaw::get(&format!("/endpoints/{}/docker/info", id)).into()
     }
 
     pub fn list_secrets(
         endpoint: i32,
         id: Option<String>,
         names: Option<Vec<String>>,
-    ) -> PRT<Vec<Secret>> {
-        PortainerRequest::get(&format!("/endpoints/{}/docker/secrets", endpoint))
+    ) -> PortainerRequest<Vec<Secret>> {
+        PortainerRequestRaw::get(&format!("/endpoints/{}/docker/secrets", endpoint))
             .with_filters(ConfigSecretFilter { id, names })
             .into()
     }
@@ -163,32 +163,38 @@ pub mod raw_requests {
         endpoint: i32,
         id: Option<String>,
         names: Option<Vec<String>>,
-    ) -> PRT<Vec<Config>> {
-        PortainerRequest::get(&format!("/endpoints/{}/docker/configs", endpoint))
+    ) -> PortainerRequest<Vec<Config>> {
+        PortainerRequestRaw::get(&format!("/endpoints/{}/docker/configs", endpoint))
             .with_filters(ConfigSecretFilter { id, names })
             .into()
     }
 
-    pub fn list_endpoints(tag_ids: Vec<i32>, name: Option<String>) -> PRT<Vec<Endpoint>> {
-        PortainerRequest::get("/endpoints")
+    pub fn list_endpoints(
+        tag_ids: Vec<i32>,
+        name: Option<String>,
+    ) -> PortainerRequest<Vec<Endpoint>> {
+        PortainerRequestRaw::get("/endpoints")
             .with_query_list("tagIds", tag_ids)
             .with_query_opt("name", name)
             .into()
     }
-    pub fn get_endpoint(id: i32) -> PRT<Endpoint> {
-        PortainerRequest::get(&format!("/endpoints/{}", id)).into()
+    pub fn get_endpoint(id: i32) -> PortainerRequest<Endpoint> {
+        PortainerRequestRaw::get(&format!("/endpoints/{}", id)).into()
     }
 
-    pub fn list_stacks(endpoint_id: Option<i32>, swarm_id: Option<String>) -> PRT<Vec<Stack>> {
-        PortainerRequest::get("/stacks")
+    pub fn list_stacks(
+        endpoint_id: Option<i32>,
+        swarm_id: Option<String>,
+    ) -> PortainerRequest<Vec<Stack>> {
+        PortainerRequestRaw::get("/stacks")
             .with_filters(StackFilter {
                 endpoint_id,
                 swarm_id,
             })
             .into()
     }
-    pub fn get_stack(id: i32) -> PRT<Stack> {
-        PortainerRequest::get(&format!("/stacks/{}", id)).into()
+    pub fn get_stack(id: i32) -> PortainerRequest<Stack> {
+        PortainerRequestRaw::get(&format!("/stacks/{}", id)).into()
     }
     pub fn update_stacks(
         endpoint_id: i32,
@@ -196,8 +202,8 @@ pub mod raw_requests {
         content: String,
         env: HashMap<String, String>,
         prune: bool,
-    ) -> PortainerRequest {
-        PortainerRequest::put(
+    ) -> PortainerRequestRaw {
+        PortainerRequestRaw::put(
             "/stacks",
             StackUpdate {
                 id,
@@ -214,8 +220,8 @@ pub mod raw_requests {
         name: String,
         content: String,
         env: HashMap<String, String>,
-    ) -> PortainerRequest {
-        PortainerRequest::post(
+    ) -> PortainerRequestRaw {
+        PortainerRequestRaw::post(
             "/stacks",
             StackCreate {
                 swarm_id,

@@ -4,77 +4,73 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value as Json;
 
 pub trait PortainerClient {
-    fn send(&self, req: &PortainerRequest) -> Json;
+    fn send(&self, req: &PortainerRequestRaw) -> Res<Json>;
 }
 
-pub fn expect<O: DeserializeOwned>(client: &dyn PortainerClient, req: &PortainerRequest) -> O {
-    serde_json::from_value(client.send(req)).expect("Invalid response format!")
-}
+pub struct PortainerRequest<O: DeserializeOwned>(PortainerRequestRaw, PhantomData<O>);
 
-pub struct PRT<O: DeserializeOwned>(PortainerRequest, PhantomData<O>);
-
-impl<O: DeserializeOwned> PRT<O> {
-    pub fn new(request: PortainerRequest) -> PRT<O> {
-        PRT(request, PhantomData::default())
+impl<O: DeserializeOwned> PortainerRequest<O> {
+    pub fn new(request: PortainerRequestRaw) -> PortainerRequest<O> {
+        PortainerRequest(request, PhantomData::default())
     }
-    pub fn send(&self, client: &dyn PortainerClient) -> O {
-        serde_json::from_value(client.send(&self.0)).expect("Invalid response format!")
+    pub fn send(&self, client: &dyn PortainerClient) -> Res<O> {
+        serde_json::from_value(client.send(&self.0)?).map_err(|x| x.to_string())
     }
 }
-impl<O: DeserializeOwned> Deref for PRT<O> {
-    type Target = PortainerRequest;
+impl<O: DeserializeOwned> Deref for PortainerRequest<O> {
+    type Target = PortainerRequestRaw;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<O: DeserializeOwned> From<PRT<O>> for PortainerRequest {
-    fn from(typed: PRT<O>) -> Self {
+impl<O: DeserializeOwned> From<PortainerRequest<O>> for PortainerRequestRaw {
+    fn from(typed: PortainerRequest<O>) -> Self {
         typed.0
     }
 }
-impl<O: DeserializeOwned> From<PortainerRequest> for PRT<O> {
-    fn from(req: PortainerRequest) -> Self {
-        PRT::new(req)
+impl<O: DeserializeOwned> From<PortainerRequestRaw> for PortainerRequest<O> {
+    fn from(req: PortainerRequestRaw) -> Self {
+        PortainerRequest::new(req)
     }
 }
 
-pub struct PortainerRequest {
+pub struct PortainerRequestRaw {
     body: Option<Json>,
     path: String,
     queries: Option<Vec<(String, String)>>,
     method: HttpMethod,
 }
-impl PortainerRequest {
-    pub fn get(path: &str) -> PortainerRequest {
-        PortainerRequest {
+impl PortainerRequestRaw {
+    pub fn get(path: &str) -> PortainerRequestRaw {
+        PortainerRequestRaw {
             body: None,
             path: path.to_string(),
             queries: None,
             method: HttpMethod::GET,
         }
     }
-    pub fn delete(path: &str) -> PortainerRequest {
-        PortainerRequest {
+    pub fn delete(path: &str) -> PortainerRequestRaw {
+        PortainerRequestRaw {
             body: None,
             path: path.to_string(),
             queries: None,
             method: HttpMethod::DELETE,
         }
     }
-    pub fn post<I: Serialize>(path: &str, body: I) -> PortainerRequest {
+    pub fn post<I: Serialize>(path: &str, body: I) -> PortainerRequestRaw {
         let body = serde_json::to_value(body).expect("Invalid body!");
-        PortainerRequest {
+        PortainerRequestRaw {
             body: Some(body),
             path: path.to_string(),
             queries: None,
             method: HttpMethod::POST,
         }
     }
-    pub fn put<I: Serialize>(path: &str, body: I) -> PortainerRequest {
+    pub fn put<I: Serialize>(path: &str, body: I) -> PortainerRequestRaw {
         let body = serde_json::to_value(body).expect("Invalid body!");
-        PortainerRequest {
+        PortainerRequestRaw {
             body: Some(body),
             path: path.to_string(),
             queries: None,
@@ -129,6 +125,8 @@ pub enum Credential {
 
 use reqwest::blocking::Client as HttpClient;
 
+use super::Res;
+
 pub struct DefaultClient {
     credential: Credential,
     client: HttpClient,
@@ -151,7 +149,7 @@ impl DefaultClient {
 }
 
 impl PortainerClient for DefaultClient {
-    fn send(&self, req: &PortainerRequest) -> Json {
+    fn send(&self, req: &PortainerRequestRaw) -> Res<Json> {
         let url = self.url_for(&req.path);
         let client = &self.client;
         let preq = match req.method {
@@ -170,11 +168,8 @@ impl PortainerClient for DefaultClient {
             Credential::APIToken(value) => preq.header("x-api-key", value),
             Credential::JwtToken(value) => preq.header("Authorization", format!("Bearer {value}")),
         };
-        let resp = authorized.send();
-        match resp {
-            Err(_err) => panic!("Failure!"),
-            Ok(rrr) => rrr.json().expect("Not a valid json!"),
-        }
+        let resp = authorized.send().map_err(|x| x.to_string())?;
+        resp.json().map_err(|x| x.to_string())
     }
 }
 

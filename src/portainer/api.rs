@@ -1,8 +1,8 @@
 use serde_json::Map;
 
-use super::client::{self, ClientFactory, Credential, PortainerClient};
+use super::client::{ClientFactory, Credential, PortainerClient};
 use super::commands::{EndpointSelector, FileMapping, InlineEnv};
-use super::requests::{raw_requests, JwtToken};
+use super::requests::raw_requests;
 use super::session::{SessionData, SessionManager};
 use super::{Action, Res};
 
@@ -23,7 +23,7 @@ impl Client {
         let mut client = self.builder.build(credential.clone(), url);
 
         if let Authentication::Login { username, password } = auth {
-            let token = Client::login(client, &username, &password);
+            let token = Client::login(client, &username, &password)?;
             client = self.builder.build(Credential::JwtToken(token), url);
         }
 
@@ -34,8 +34,10 @@ impl Client {
         })
     }
 
-    fn login(client: Box<dyn PortainerClient>, username: &str, password: &str) -> String {
-        client::expect::<JwtToken>(client.as_ref(), &raw_requests::login(username, password)).value
+    fn login(client: Box<dyn PortainerClient>, username: &str, password: &str) -> Res<String> {
+        raw_requests::login(username, password)
+            .send(client.as_ref())
+            .map(|r| r.value)
     }
 }
 
@@ -85,7 +87,7 @@ impl Endpoint {
     }
     pub fn destroy(&self, stack: String, configs: Vec<String>, secrets: Vec<String>) -> Res<Plan> {
         let stacks = raw_requests::list_stacks(Some(self.id), Some(self.swarm_id.to_string()))
-            .send(self.client.as_ref());
+            .send(self.client.as_ref())?;
 
         Err(String::from(""))
     }
