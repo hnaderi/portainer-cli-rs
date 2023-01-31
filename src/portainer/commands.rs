@@ -15,7 +15,7 @@ pub enum CLICommand {
     },
     Destroy {
         server: ServerConfig,
-        stack: String,
+        stacks: Vec<String>,
         endpoint: EndpointSelector,
         confirmed: bool,
         configs: Vec<String>,
@@ -29,21 +29,14 @@ pub enum CLICommand {
     Logout(String),
 }
 
-pub struct InlineEnv {
-    key: String,
-    value: String,
-}
-
-pub struct FileMapping {
-    name: String,
-    source: Box<Path>,
-}
+pub struct InlineEnv(pub String, pub String);
+pub struct FileMapping(pub String, pub Box<Path>);
 
 pub enum EndpointSelector {
     ByName(String),
-    ById(u32),
+    ById(i32),
     ByTags(Vec<String>),
-    ByTagIds(Vec<u32>),
+    ByTagIds(Vec<i32>),
 }
 
 pub enum LoginCredential {

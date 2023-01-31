@@ -1,8 +1,9 @@
-use serde_json::Map;
+use std::fs;
+use std::path::Path;
 
 use super::client::{ClientFactory, Credential, PortainerClient};
 use super::commands::{EndpointSelector, FileMapping, InlineEnv};
-use super::requests::raw_requests;
+use super::requests::{self, raw_requests, Config, Secret, Stack};
 use super::session::{SessionData, SessionManager};
 use super::{Action, Res};
 
@@ -52,9 +53,47 @@ pub struct Session {
     credential: Credential,
     url: String,
 }
+
+fn assert_selected(all: Vec<requests::Endpoint>) -> Res<i32> {
+    if all.len() == 1 {
+        Ok(all.get(0).unwrap().id())
+    } else {
+        Err(format!(
+            "Must select exactly one endpoint, but selected {}",
+            all.len()
+        ))
+    }
+}
 impl Session {
-    pub fn endpoint(&self, selector: &EndpointSelector) -> Res<Endpoint> {
-        todo!()
+    pub fn endpoint(self, selector: EndpointSelector) -> Res<Endpoint> {
+        let client = self.client.as_ref();
+
+        let id = match selector {
+            EndpointSelector::ById(id) => id.to_owned(),
+            EndpointSelector::ByName(name) => assert_selected(
+                raw_requests::list_endpoints(vec![], Some(name.to_string())).send(client)?,
+            )?,
+            EndpointSelector::ByTagIds(tag_ids) => {
+                assert_selected(raw_requests::list_endpoints(tag_ids, None).send(client)?)?
+            }
+            EndpointSelector::ByTags(tags) => {
+                let tag_ids = raw_requests::list_tags()
+                    .send(client)?
+                    .iter()
+                    .filter(|t| tags.contains(&t.name))
+                    .map(|t| t.tagged_endpoints())
+                    .reduce(|a, b| a.intersection(&b).map(|x| *x).collect())
+                    .ok_or("Tags must select a unique endpoint")?
+                    .into_iter()
+                    .collect();
+                assert_selected(raw_requests::list_endpoints(tag_ids, None).send(client)?)?
+            }
+        };
+
+        Ok(Endpoint {
+            client: self.client,
+            id,
+        })
     }
     pub fn save(&self, session: &dyn SessionManager, name: &str) -> Action {
         let data = match &self.credential {
@@ -72,43 +111,78 @@ impl Session {
 pub struct Endpoint {
     client: Box<dyn PortainerClient>,
     id: i32,
-    swarm_id: String,
 }
 impl Endpoint {
     pub fn deploy(
-        &self,
+        self,
         compose: String,
         stack: String,
         inline_vars: Vec<InlineEnv>,
         configs: Vec<FileMapping>,
         secrets: Vec<FileMapping>,
     ) -> Res<Plan> {
-        Err(String::from(""))
+        let client = self.client.as_ref();
+        let swarm_id = raw_requests::get_endpoint_info(self.id)
+            .send(client)?
+            .swarm
+            .id;
+
+        let all_stacks =
+            raw_requests::list_stacks(Some(self.id), Some(swarm_id.to_string())).send(client)?;
+
+        let stack_plan = match all_stacks.iter().find(|s| s.name == stack) {
+            None => StackPlan::Create {
+                name: stack,
+                swarm_id,
+            },
+            Some(s) => StackPlan::Update(s.id),
+        };
+        let definition = PlanDef::Deploy {
+            stack_plan,
+            compose,
+            inline_vars,
+            configs,
+            secrets,
+        };
+
+        Ok(Plan {
+            definition,
+            endpoint: self.id,
+            client: self.client,
+        })
     }
-    pub fn destroy(&self, stack: String, configs: Vec<String>, secrets: Vec<String>) -> Res<Plan> {
-        let stacks = raw_requests::list_stacks(Some(self.id), Some(self.swarm_id.to_string()))
-            .send(self.client.as_ref())?;
 
-        Err(String::from(""))
+    pub fn destroy(
+        self,
+        stacks: Vec<String>,
+        configs: Vec<String>,
+        secrets: Vec<String>,
+    ) -> Res<Plan> {
+        let client = self.client.as_ref();
+
+        let all_stacks = raw_requests::list_stacks(Some(self.id), None).send(client)?;
+
+        let stacks = all_stacks
+            .iter()
+            .filter(|s| stacks.contains(&s.name))
+            .map(|s| s.clone())
+            .collect();
+
+        let configs = raw_requests::list_configs(self.id, None, Some(configs)).send(client)?;
+        let secrets = raw_requests::list_secrets(self.id, None, Some(secrets)).send(client)?;
+
+        let definition = PlanDef::Destroy {
+            stacks,
+            configs,
+            secrets,
+        };
+
+        Ok(Plan {
+            definition,
+            endpoint: self.id,
+            client: self.client,
+        })
     }
-
-    // pub fn create_stack(&self) {}
-    // pub fn create_secret(&self) {}
-    // pub fn create_config(&self) {}
-
-    // pub fn update_stack(&self) {}
-
-    // pub fn get_stack(&self) {
-    //     todo!()
-    // }
-    // pub fn get_secret(&self) {}
-    // pub fn get_config(&self) {}
-
-    // pub fn delete_stack(&self) {
-    //     todo!()
-    // }
-    // pub fn delete_secret(&self) {}
-    // pub fn delete_config(&self) {}
 }
 
 pub struct Plan {
@@ -117,50 +191,161 @@ pub struct Plan {
     client: Box<dyn PortainerClient>,
 }
 impl Plan {
+    fn read(path: Box<Path>) -> Res<String> {
+        fs::read_to_string(path).map_err(|x| x.to_string())
+    }
+
     pub fn execute(self) -> Action {
         match self.definition {
-            PlanDef::Deploy() => Ok(()),
-            PlanDef::Destroy {
-                stack,
+            PlanDef::Deploy {
+                stack_plan,
+                compose,
+                inline_vars,
                 configs,
                 secrets,
-            } => Ok(()),
+            } => {
+                let client = self.client.as_ref();
+
+                for FileMapping(name, path) in configs {
+                    let content = Plan::read(path)?;
+                    raw_requests::create_config(self.endpoint, name, content).send(client)?;
+                }
+                for FileMapping(name, path) in secrets {
+                    let content = Plan::read(path)?;
+                    raw_requests::create_secret(self.endpoint, name, content).send(client)?;
+                }
+
+                let env = inline_vars
+                    .into_iter()
+                    .map(|InlineEnv(key, value)| (key, value))
+                    .collect();
+
+                match stack_plan {
+                    StackPlan::Create { name, swarm_id } => {
+                        raw_requests::create_stacks(self.endpoint, swarm_id, name, compose, env)
+                            .send(self.client.as_ref())
+                    }
+                    StackPlan::Update(stack_id) => {
+                        raw_requests::update_stacks(self.endpoint, stack_id, compose, env, true)
+                            .send(client)
+                    }
+                }?;
+
+                Ok(())
+            }
+            PlanDef::Destroy {
+                stacks,
+                configs,
+                secrets,
+            } => {
+                let client = self.client.as_ref();
+
+                for stack in stacks {
+                    raw_requests::delete_stack(stack.id).send(client)?;
+                }
+                for config in configs {
+                    raw_requests::delete_config(self.endpoint, config.id).send(client)?;
+                }
+                for secret in secrets {
+                    raw_requests::delete_secret(self.endpoint, secret.id).send(client)?;
+                }
+
+                Ok(())
+            }
         }
     }
+
+    pub fn prompt(self, confirmed: bool) -> Action {
+        if confirmed {
+            self.execute()
+        } else {
+            self.print();
+            for line in std::io::stdin().lines() {
+                let line = line.map_err(|x| x.to_string()).map(|s| s.to_lowercase())?;
+                if line == "yes" {
+                    self.execute()?;
+                    break;
+                } else if line == "no" {
+                    break;
+                } else {
+                    println!("You must answer 'yes' or 'no'");
+                    continue;
+                }
+            }
+            Ok(())
+        }
+    }
+
     pub fn print(&self) {
         match &self.definition {
-            PlanDef::Deploy() => println!(""),
-            PlanDef::Destroy {
-                stack,
+            PlanDef::Deploy {
+                stack_plan,
+                compose: _,
+                inline_vars: _,
                 configs,
                 secrets,
-            } => println!(""),
+            } => {
+                println!("Deploy plan:");
+                match stack_plan {
+                    StackPlan::Create { name, swarm_id } => println!(
+                        "Create a new stack with name {} on swarm cluster '{}'",
+                        name, swarm_id
+                    ),
+                    StackPlan::Update(id) => println!("Update existing stack with id {}", id),
+                };
+
+                for FileMapping(name, _) in configs {
+                    println!("Try to create a new config with name {}", name);
+                }
+
+                for FileMapping(name, _) in secrets {
+                    println!("Try to create a new secret with name {}", name);
+                }
+            }
+            PlanDef::Destroy {
+                stacks,
+                configs,
+                secrets,
+            } => {
+                println!("Destroy plan:");
+                for stack in stacks {
+                    println!("Stack '{}' will be removed. (id: {})", stack.name, stack.id);
+                }
+                for config in configs {
+                    println!(
+                        "Config '{}' will be removed. (id: {})",
+                        config.name(),
+                        config.id
+                    );
+                }
+                for secret in secrets {
+                    println!(
+                        "Secret '{}' will be removed. (id: {})",
+                        secret.name(),
+                        secret.id
+                    );
+                }
+            }
         }
     }
 }
 
 enum PlanDef {
-    Deploy(),
+    Deploy {
+        stack_plan: StackPlan,
+        compose: String,
+        inline_vars: Vec<InlineEnv>,
+        configs: Vec<FileMapping>,
+        secrets: Vec<FileMapping>,
+    },
     Destroy {
-        stack: String,
-        configs: Map<String, String>,
-        secrets: Map<String, String>,
+        stacks: Vec<Stack>,
+        configs: Vec<Config>,
+        secrets: Vec<Secret>,
     },
 }
 
 enum StackPlan {
-    Create {
-        compose: String,
-        stack: String,
-        inline_vars: Vec<InlineEnv>,
-        configs: Vec<FileMapping>,
-        secrets: Vec<FileMapping>,
-    },
-    Update {
-        compose: String,
-        stack_id: u32,
-        inline_vars: Vec<InlineEnv>,
-        configs: Vec<FileMapping>,
-        secrets: Vec<FileMapping>,
-    },
+    Create { name: String, swarm_id: String },
+    Update(i32),
 }

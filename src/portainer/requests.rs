@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -17,24 +17,33 @@ pub struct JwtToken {
 #[derive(Deserialize)]
 pub struct Tag {
     #[serde(rename = "id")]
-    id: String,
+    pub id: String,
     #[serde(rename = "Name")]
-    name: String,
+    pub name: String,
     #[serde(rename = "Endpoints")]
     endpoints: HashMap<i32, bool>,
 }
+impl Tag {
+    pub fn tagged_endpoints(&self) -> HashSet<i32> {
+        self.endpoints
+            .iter()
+            .filter(|(_, v)| **v)
+            .map(|(k, _)| *k)
+            .collect()
+    }
+}
 
 #[derive(Deserialize)]
-struct SwarmInfo {
+pub struct SwarmInfo {
     #[serde(rename = "Cluster")]
-    cluster: String,
+    pub cluster: String,
     #[serde(rename = "ID")]
-    id: String,
+    pub id: String,
 }
 #[derive(Deserialize)]
 pub struct EndpointInfo {
     #[serde(rename = "Swarm")]
-    swarm: SwarmInfo,
+    pub swarm: SwarmInfo,
 }
 
 #[derive(Deserialize)]
@@ -54,29 +63,39 @@ struct ConfigSecretFilter {
 #[derive(Deserialize)]
 pub struct Config {
     #[serde(rename = "ID")]
-    id: String,
+    pub id: String,
     #[serde(rename = "spec")]
     spec: ConfigSecretSpec,
+}
+impl Config {
+    pub fn name(&self) -> &String {
+        &self.spec.name
+    }
 }
 
 #[derive(Deserialize)]
 pub struct Secret {
     #[serde(rename = "ID")]
-    id: String,
+    pub id: String,
     #[serde(rename = "spec")]
     spec: ConfigSecretSpec,
 }
+impl Secret {
+    pub fn name(&self) -> &String {
+        &self.spec.name
+    }
+}
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Stack {
     #[serde(rename = "Id")]
-    id: i32,
+    pub id: i32,
     #[serde(rename = "Name")]
-    name: String,
+    pub name: String,
     #[serde(rename = "SwarmId")]
-    swarm_id: Option<String>,
+    pub swarm_id: Option<String>,
     #[serde(rename = "EndpointId")]
-    endpoint_id: String,
+    pub endpoint_id: String,
 }
 #[derive(Serialize)]
 struct StackFilter {
@@ -119,12 +138,28 @@ pub struct Endpoint {
     tag_ids: Vec<String>,
 }
 impl Endpoint {
-    fn name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
-    fn id(&self) -> i32 {
+    pub fn id(&self) -> i32 {
         self.id
     }
+}
+
+#[derive(Serialize)]
+struct ConfigSecretRequest {
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Labels")]
+    labels: HashMap<String, String>,
+    #[serde(rename = "Data")]
+    content: String,
+}
+
+fn base64(data: String) -> String {
+    use base64::engine::general_purpose;
+    use base64::Engine as _;
+    general_purpose::STANDARD.encode(data)
 }
 
 pub mod raw_requests {
@@ -150,6 +185,20 @@ pub mod raw_requests {
         PortainerRequestRaw::get(&format!("/endpoints/{}/docker/info", id)).into()
     }
 
+    pub fn create_secret(endpoint: i32, name: String, content: String) -> PortainerRequestRaw {
+        PortainerRequestRaw::post(
+            &format!("/endpoints/{}/docker/secrets/create", endpoint),
+            ConfigSecretRequest {
+                name,
+                labels: HashMap::new(),
+                content: base64(content),
+            },
+        )
+    }
+    pub fn delete_secret(endpoint: i32, id: String) -> PortainerRequestRaw {
+        PortainerRequestRaw::delete(&format!("/endpoints/{}/docker/secrets/{}", endpoint, id))
+    }
+
     pub fn list_secrets(
         endpoint: i32,
         id: Option<String>,
@@ -159,6 +208,21 @@ pub mod raw_requests {
             .with_filters(ConfigSecretFilter { id, names })
             .into()
     }
+
+    pub fn create_config(endpoint: i32, name: String, content: String) -> PortainerRequestRaw {
+        PortainerRequestRaw::post(
+            &format!("/endpoints/{}/docker/configs/create", endpoint),
+            ConfigSecretRequest {
+                name,
+                labels: HashMap::new(),
+                content: base64(content),
+            },
+        )
+    }
+    pub fn delete_config(endpoint: i32, id: String) -> PortainerRequestRaw {
+        PortainerRequestRaw::delete(&format!("/endpoints/{}/docker/configs/{}", endpoint, id))
+    }
+
     pub fn list_configs(
         endpoint: i32,
         id: Option<String>,
@@ -233,5 +297,8 @@ pub mod raw_requests {
         .with_query("endpointId", &format!("{}", endpoint_id))
         .with_query("method", "string")
         .with_query("type", "1")
+    }
+    pub fn delete_stack(id: i32) -> PortainerRequestRaw {
+        PortainerRequestRaw::delete(&format!("/stacks/{}", id))
     }
 }

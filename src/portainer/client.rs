@@ -107,6 +107,10 @@ impl PortainerRequestRaw {
             &serde_json::to_string(&t).expect("Cannot serialize filters!"),
         )
     }
+
+    pub fn send(&self, client: &dyn PortainerClient) -> Res<Json> {
+        client.send(self)
+    }
 }
 
 pub enum HttpMethod {

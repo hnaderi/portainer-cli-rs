@@ -9,18 +9,19 @@ pub struct Application {
     session: Box<dyn SessionManager>,
 }
 
+fn readpassword() -> String {
+    use std::io::Write;
+    print!("Type a password: ");
+    std::io::stdout().flush().unwrap();
+    rpassword::read_password().expect("Password is required for loging in!")
+}
+
 impl Application {
     pub fn new() -> Application {
         let p = Box::from(Path::new(".portainer.json"));
         let lsm = LocalSessionManager::new(p).expect("Invalid session file");
         let session = Box::new(lsm);
         Application { session }
-    }
-    fn readpassword() -> String {
-        use std::io::Write;
-        print!("Type a password: ");
-        std::io::stdout().flush().unwrap();
-        rpassword::read_password().expect("Password is required for loging in!")
     }
 
     fn load_session(&self, config: ServerConfig, cl: Client) -> Result<Session, String> {
@@ -30,7 +31,7 @@ impl Application {
                 username,
                 password,
             } => {
-                let password = password.unwrap_or(Application::readpassword());
+                let password = password.unwrap_or(readpassword());
                 cl.authenticate(Authentication::Login { username, password }, &address)
             }
             ServerConfig::InlineToken { address, token } => {
@@ -76,37 +77,25 @@ impl Application {
                 inline_vars,
                 configs,
                 secrets,
-            } => {
-                let plan = self
-                    .load_session(server, client)?
-                    .endpoint(&endpoint)?
-                    .deploy(compose, stack, inline_vars, configs, secrets)?;
+            } => self
+                .load_session(server, client)?
+                .endpoint(endpoint)?
+                .deploy(compose, stack, inline_vars, configs, secrets)?
+                .prompt(confirmed),
 
-                if confirmed {
-                    plan.execute()
-                } else {
-                    Ok(())
-                }
-            }
             CLICommand::Destroy {
                 server,
-                stack,
+                stacks,
                 endpoint,
                 confirmed,
                 configs,
                 secrets,
-            } => {
-                let plan = self
-                    .load_session(server, client)?
-                    .endpoint(&endpoint)?
-                    .destroy(stack, configs, secrets)?;
+            } => self
+                .load_session(server, client)?
+                .endpoint(endpoint)?
+                .destroy(stacks, configs, secrets)?
+                .prompt(confirmed),
 
-                if confirmed {
-                    plan.execute()
-                } else {
-                    Ok(())
-                }
-            }
             CLICommand::Logout(name) => self.session.remove(&name),
         }
     }
