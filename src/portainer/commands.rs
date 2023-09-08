@@ -1,6 +1,6 @@
-use clap::ArgMatches;
-use clap::{arg, Command};
-use std::fmt::format;
+use clap::{arg, Command, Arg};
+use clap::{ArgGroup, ArgMatches};
+
 use std::path::Path;
 
 pub enum CLICommand {
@@ -88,14 +88,56 @@ fn server_config_parse(matches: &ArgMatches) -> ParseResult<ServerConfig> {
             .ok_or_else(|| "You must enter either session or address and token".to_string())
     }
 }
+
 fn deploy_command() -> Command {
-    Command::new("deploy")
-        .about("deploys stack and its dependencies")
-        .arg(arg!(-t --token <token> "API token"))
+    app_args(
+        Command::new("deploy").about("deploys stack and its dependencies")
+        .arg(arg!(-f --compose <FILE> "compose file to deploy").required(true))
+        .arg(arg!(--config <FILEMAPPING> "file mapping to be created as docker config, format `name:file`"))
+        .arg(arg!(--secret <FILEMAPPING> "file mapping to be created as docker secret, format `name:file`"))
+        .arg(arg!(-e --env <ENVVAR> "environment variables to add to stack, format `KEY=VALUE`, these take precedence over envfile"))
+        .arg(arg!(--envfile <FILE> "dotenv file to add to stack, values are merged with other inline vars"))
+        .arg(arg!(-Y --confirm "confirms automatically and do not ask for prompts"))
+    )
+}
+
+fn server_config_args(cmd: Command) -> Command {
+    let session = ArgGroup::new("from-session")
+        .arg("session")
+        .requires("session")
+        .conflicts_with_all(["from-token", "from-userpass"]);
+    let token = ArgGroup::new("from-token")
+        .arg("token")
+        .requires_all(["address", "token"])
+        .conflicts_with_all(["from-session", "from-userpass"]);
+    let userpass = ArgGroup::new("from-userpass")
+        .arg("username")
+        .requires_all(["address", "username"])
+        .conflicts_with_all(["from-token", "from-session"]);
+
+    cmd.arg(arg!(--token <token> "API token"))
         .arg(arg!(-u --username <username> "username to login"))
         .arg(arg!(-p --password <password> "password for login"))
         .arg(arg!(-H --address <url> "Server address"))
         .arg(arg!(-S --session <name> "Existing session name"))
+        .groups([session, token, userpass])
+}
+
+fn endpoint_args(cmd: Command) -> Command {
+    let endpoint = ArgGroup::new("endpoint-selector")
+        .args(["name", "id", "tag", "tagid"])
+        .required(true);
+    let arg= Arg::new("").value_parser(parser);
+
+    cmd.arg(arg!(-N --name <ENDPOINT> "endpoint name"))
+        .arg(arg!(-E --id <ENDPOINT_ID> "endpoint id"))
+        .arg(arg!(-t --tag <TAG> "endpoint tag"))
+        .arg(arg!(-T --tagid <TAG_ID> "endpoint tag id"))
+        .group(endpoint)
+}
+
+fn app_args(cmd: Command) -> Command {
+    server_config_args(endpoint_args(cmd))
 }
 
 fn deploy_parse(matches: &ArgMatches) -> ParseResult<CLICommand> {
@@ -111,7 +153,7 @@ fn deploy_parse(matches: &ArgMatches) -> ParseResult<CLICommand> {
     })
 }
 fn destroy_command() -> Command {
-    Command::new("destroy").about("destroy stacks, configs, secrets")
+    app_args(Command::new("destroy").about("destroy stacks, configs, secrets"))
 }
 fn login_command() -> Command {
     Command::new("login").about("login to server and adds it to sessions")
